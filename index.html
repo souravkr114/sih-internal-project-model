@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delhi EV Charging Intelligence Platform (SIH BV806)</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- React 18, ReactDOM, Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- FontAwesome / Lucide Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+  <style>
+    body {
+      background-color: #020617;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .leaflet-popup-content-wrapper {
+      background: #0f172a !important;
+      color: #f8fafc !important;
+      border: 1px solid #334155 !important;
+      border-radius: 12px !important;
+    }
+    .leaflet-popup-tip {
+      background: #0f172a !important;
+    }
+    .custom-rank-pin, .custom-station-pin {
+      background: none !important;
+      border: none !important;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Existing Charging Stations Dataset
+    const EXISTING_STATIONS = [
+      { id: 'DEL-STA-001', name: 'Tata Power EZ Charge - Connaught Place', operator: 'Tata Power', lat: 28.6315, lng: 77.2167, district: 'Central Delhi', chargers: 6, powerKw: 150, util: 78 },
+      { id: 'DEL-STA-002', name: 'BluSmart EV Hub - Aerocity Metro', operator: 'BluSmart Mobility', lat: 28.5492, lng: 77.1215, district: 'South West Delhi', chargers: 16, powerKw: 480, util: 92 },
+      { id: 'DEL-STA-003', name: 'DTL Public Fast Charger - Saket District Centre', operator: 'Delhi Transco Ltd', lat: 28.5284, lng: 77.2189, district: 'South Delhi', chargers: 4, powerKw: 100, util: 65 },
+      { id: 'DEL-STA-004', name: 'Statiq Hub - Nehru Place Outer Ring', operator: 'Statiq', lat: 28.5494, lng: 77.2519, district: 'South East Delhi', chargers: 8, powerKw: 240, util: 84 },
+      { id: 'DEL-STA-005', name: 'Fortum Charge & Drive - Janakpuri DC', operator: 'Fortum', lat: 28.6293, lng: 77.0784, district: 'West Delhi', chargers: 4, powerKw: 120, util: 71 },
+      { id: 'DEL-STA-006', name: 'Exicom Smart Charger - Rohini Sec 10', operator: 'Exicom', lat: 28.7112, lng: 77.1189, district: 'North West Delhi', chargers: 6, powerKw: 120, util: 59 },
+      { id: 'DEL-STA-007', name: 'DTL Public Charger - Anand Vihar ISBT', operator: 'Delhi Transco Ltd', lat: 28.6469, lng: 77.3162, district: 'East Delhi', chargers: 10, powerKw: 300, util: 88 }
+    ];
+
+    // Candidate Locations Dataset
+    const CANDIDATES = [
+      {
+        id: 'CAND-DEL-001',
+        rank: 1,
+        name: 'Kashmiri Gate ISBT Multi-Modal Transit Hub',
+        district: 'North Delhi',
+        lat: 28.6698,
+        lng: 77.2285,
+        address: 'Ring Road Interchange, Near Kashmiri Gate ISBT, North Delhi',
+        score: 94.2,
+        demandScore: 96.0,
+        supplyGapScore: 92.5,
+        evDensityScore: 91.0,
+        trafficScore: 98.0,
+        dwellScore: 89.0,
+        gridFeasibilityScore: 90.0,
+        predictedSessions: 78,
+        predictedKwh: 1840,
+        estPaybackMonths: 18,
+        estRoi: 32.4,
+        shapFeatures: [
+          { feature: 'Heavy Interstate & Commercial EV Traffic Exposure', weight: '+24.5', desc: 'Intersection of Ring Road and GT Road carries 145k+ vehicles/day with heavy 3W/4W commercial EV conversion.' },
+          { feature: 'Severe Charging Supply Deficit within 3km', weight: '+21.0', desc: 'Only 2 public fast chargers exist within 2km radius, creating unserved demand gap.' },
+          { feature: 'Multi-Modal Dwell Time (ISBT + Metro)', weight: '+18.2', desc: 'Interstate commuters produce high average dwell times (35-60 mins) ideal for fast charging.' }
+        ],
+        gridDistance: '110m',
+        transformer: '1250 kVA',
+        parking: 24,
+        feasibility: 'Ready (Direct Substation Line)'
+      },
+      {
+        id: 'CAND-DEL-002',
+        rank: 2,
+        name: 'Nehru Place Commercial & IT Park Extension',
+        district: 'South East Delhi',
+        lat: 28.5481,
+        lng: 77.2530,
+        address: 'Outer Ring Road Flyover Bay, Nehru Place',
+        score: 91.8,
+        demandScore: 94.0,
+        supplyGapScore: 88.0,
+        evDensityScore: 95.5,
+        trafficScore: 92.0,
+        dwellScore: 93.0,
+        gridFeasibilityScore: 86.0,
+        predictedSessions: 68,
+        predictedKwh: 1560,
+        estPaybackMonths: 21,
+        estRoi: 28.6,
+        shapFeatures: [
+          { feature: 'Highest Commercial EV & Fleet Density in South Delhi', weight: '+26.0', desc: 'Nehru Place IT hub generates massive daily office commuter and ride-hailing EV traffic.' },
+          { feature: 'Extended Daytime Dwell Time (Workplace Charging)', weight: '+20.5', desc: 'Average dwell duration exceeds 4 hours for IT professionals.' }
+        ],
+        gridDistance: '240m',
+        transformer: '1000 kVA',
+        parking: 30,
+        feasibility: 'Ready'
+      },
+      {
+        id: 'CAND-DEL-003',
+        rank: 3,
+        name: 'Janakpuri District Centre Commercial Corridor',
+        district: 'West Delhi',
+        lat: 28.6288,
+        lng: 77.0812,
+        address: 'Najafgarh Road Corridor, Janakpuri West',
+        score: 88.5,
+        demandScore: 89.0,
+        supplyGapScore: 91.0,
+        evDensityScore: 86.0,
+        trafficScore: 90.0,
+        dwellScore: 88.0,
+        gridFeasibilityScore: 84.0,
+        predictedSessions: 58,
+        predictedKwh: 1320,
+        estPaybackMonths: 24,
+        estRoi: 25.1,
+        shapFeatures: [
+          { feature: 'Arterial Najafgarh Road High EV Flow', weight: '+22.1', desc: 'Connects West Delhi residential hubs to Gurugram & Central Delhi bypass.' }
+        ],
+        gridDistance: '310m',
+        transformer: '800 kVA',
+        parking: 18,
+        feasibility: 'Minor Upgrade Required'
+      },
+      {
+        id: 'CAND-DEL-004',
+        rank: 4,
+        name: 'Anand Vihar Multi-Modal Transportation Depot',
+        district: 'East Delhi',
+        lat: 28.6475,
+        lng: 77.3150,
+        address: 'Chauhan Patti Road, Anand Vihar Border',
+        score: 86.9,
+        demandScore: 91.0,
+        supplyGapScore: 84.0,
+        evDensityScore: 82.0,
+        trafficScore: 96.0,
+        dwellScore: 85.0,
+        gridFeasibilityScore: 82.0,
+        predictedSessions: 62,
+        predictedKwh: 1480,
+        estPaybackMonths: 22,
+        estRoi: 27.2,
+        shapFeatures: [
+          { feature: 'Inter-state Delhi-UP Border Fleet Corridor', weight: '+25.4', desc: 'High volume of electric commercial delivery vans and 3W feeder rickshaws.' }
+        ],
+        gridDistance: '180m',
+        transformer: '1500 kVA',
+        parking: 40,
+        feasibility: 'Ready'
+      }
+    ];
+
+    // District Deficit Data
+    const DISTRICTS = [
+      { name: 'South Delhi', evs: 42800, growth: '+38.5%', chargers: 94, ratio: '455.3 EVs/charger', score: 88, status: 'Moderate Margin' },
+      { name: 'South East Delhi', evs: 36200, growth: '+42.1%', chargers: 68, ratio: '532.3 EVs/charger', score: 92, status: 'High Capacity' },
+      { name: 'West Delhi', evs: 38500, growth: '+35.2%', chargers: 52, ratio: '740.3 EVs/charger', score: 94, status: 'Moderate Margin' },
+      { name: 'North Delhi', evs: 29400, growth: '+31.8%', chargers: 38, ratio: '773.6 EVs/charger', score: 96, status: 'High Capacity' },
+      { name: 'East Delhi', evs: 31200, growth: '+36.9%', chargers: 44, ratio: '709.0 EVs/charger', score: 90, status: 'Constrained' },
+      { name: 'Central Delhi', evs: 24800, growth: '+29.4%', chargers: 62, ratio: '400.0 EVs/charger', score: 72, status: 'Moderate Margin' }
+    ];
+
+    function App() {
+      const [selectedCandidate, setSelectedCandidate] = useState(CANDIDATES[0]);
+      const [activeTab, setActiveTab] = useState('intelligence');
+      const [activeRole, setActiveRole] = useState('investor');
+      const [activeLayer, setActiveLayer] = useState('candidates');
+      const [showLineage, setShowLineage] = useState(false);
+      const [showReport, setShowReport] = useState(false);
+
+      // Financial Simulator state
+      const [dc50Qty, setDc50Qty] = useState(2);
+      const [ac22Qty, setAc22Qty] = useState(2);
+      const [sellTariff, setSellTariff] = useState(18);
+      const [targetUtil, setTargetUtil] = useState(45);
+      const [siteRent, setSiteRent] = useState(45000);
+
+      const mapContainerRef = useRef(null);
+      const mapInstanceRef = useRef(null);
+
+      // Initialize Leaflet Map
+      useEffect(() => {
+        if (!mapContainerRef.current) return;
+        
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.remove();
+        }
+
+        const map = L.map(mapContainerRef.current).setView([28.6139, 77.2090], 11);
+        mapInstanceRef.current = map;
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap & Delhi GIS'
+        }).addTo(map);
+
+        // Render Candidates
+        if (activeLayer === 'candidates' || activeLayer === 'gap') {
+          CANDIDATES.forEach(c => {
+            const isSelected = c.id === selectedCandidate.id;
+            const icon = L.divIcon({
+              className: 'custom-rank-pin',
+              html: `<div class="w-8 h-8 rounded-full ${isSelected ? 'bg-emerald-400 text-slate-950 ring-4 ring-emerald-400/40 font-black' : 'bg-gradient-to-tr from-emerald-500 to-cyan-500 text-slate-950 font-bold'} flex items-center justify-center text-xs shadow-lg">${c.rank}</div>`,
+              iconSize: [32, 32],
+              iconAnchor: [16, 16]
+            });
+
+            const marker = L.marker([c.lat, c.lng], { icon }).addTo(map);
+            marker.bindPopup(`<b>Rank #${c.rank}: ${c.name}</b><br/>Score: ${c.score}/100<br/>District: ${c.district}`);
+            marker.on('click', () => setSelectedCandidate(c));
+
+            if (isSelected) {
+              L.circle([c.lat, c.lng], {
+                radius: 1500,
+                color: '#10b981',
+                fillColor: '#10b981',
+                fillOpacity: 0.15,
+                dashArray: '4,4'
+              }).addTo(map);
+            }
+          });
+        }
+
+        // Render Existing Stations
+        if (activeLayer === 'stations' || activeLayer === 'candidates') {
+          EXISTING_STATIONS.forEach(st => {
+            const icon = L.divIcon({
+              className: 'custom-station-pin',
+              html: `<div class="w-6 h-6 rounded-lg bg-cyan-500 flex items-center justify-center text-slate-950 font-bold text-[10px] shadow">⚡</div>`,
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            });
+            const marker = L.marker([st.lat, st.lng], { icon }).addTo(map);
+            marker.bindPopup(`<b>${st.name}</b><br/>${st.operator}<br/>Chargers: ${st.chargers} (${st.powerKw} kW)`);
+          });
+        }
+
+        return () => {
+          if (mapInstanceRef.current) {
+            mapInstanceRef.current.remove();
+            mapInstanceRef.current = null;
+          }
+        };
+      }, [selectedCandidate, activeLayer]);
+
+      // Financial Calculation
+      const capexEquipment = (dc50Qty * 1400000) + (ac22Qty * 250000);
+      const totalPowerKw = (dc50Qty * 50) + (ac22Qty * 22);
+      const capexGrid = 350000 + (totalPowerKw * 2500);
+      const totalCapex = capexEquipment + capexGrid;
+
+      const dailyKwh = (totalPowerKw * 18) * (targetUtil / 100);
+      const monthlyRev = dailyKwh * sellTariff * 30;
+      const monthlyPowerCost = dailyKwh * 6.8 * 30;
+      const monthlyOpex = monthlyPowerCost + siteRent + 15000;
+      const monthlyNetProfit = monthlyRev - monthlyOpex;
+      const annualProfit = monthlyNetProfit * 12;
+      const roiPercent = totalCapex > 0 ? ((annualProfit / totalCapex) * 100).toFixed(1) : 0;
+      const paybackMonths = annualProfit > 0 ? Math.round((totalCapex / annualProfit) * 12) : 99;
+
+      return (
+        <div className="flex flex-col min-h-screen">
+          
+          {/* Header */}
+          <header className="bg-slate-900/90 border-b border-slate-800 px-6 py-3 sticky top-0 z-50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center text-slate-950 font-black text-xl">⚡</div>
+              <div>
+                <h1 className="font-bold text-lg text-white flex items-center gap-2">
+                  Delhi EV Charging Intelligence
+                  <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded-full font-mono">SIH BV806</span>
+                </h1>
+                <p className="text-xs text-slate-400">MoHUA Decision Support System • Delhi NCT GIS</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex gap-1 text-xs">
+              <button onClick={() => { setActiveRole('investor'); setActiveTab('intelligence'); }} className={`px-3 py-1.5 rounded-lg font-medium transition ${activeRole === 'investor' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'}`}>📈 Investor Mode</button>
+              <button onClick={() => { setActiveRole('operator'); setActiveTab('intelligence'); }} className={`px-3 py-1.5 rounded-lg font-medium transition ${activeRole === 'operator' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'}`}>⚡ Operator Mode</button>
+              <button onClick={() => { setActiveRole('planner'); setActiveTab('district'); }} className={`px-3 py-1.5 rounded-lg font-medium transition ${activeRole === 'planner' ? 'bg-violet-500 text-white font-bold' : 'text-slate-400 hover:text-white'}`}>🏛️ MoHUA Planner</button>
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={() => setShowLineage(true)} className="px-3 py-1.5 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">Data Lineage</button>
+              <button onClick={() => setShowReport(true)} className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-400 text-slate-950 hover:bg-emerald-300">Export Report</button>
+            </div>
+          </header>
+
+          {/* Main Layout */}
+          <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+            
+            {/* KPI Cards */}
+            <div className="grid grid-cols-4 gap-4">
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase block">Total Delhi EVs</span>
+                <span className="text-2xl font-black text-emerald-400 font-mono">246.0k <span className="text-xs text-slate-400 font-normal">registered</span></span>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase block">Public Chargers</span>
+                <span className="text-2xl font-black text-cyan-400 font-mono">2,480 <span className="text-xs text-slate-400 font-normal">active units</span></span>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase block">EV / Charger Ratio</span>
+                <span className="text-2xl font-black text-amber-400 font-mono">99.2 <span className="text-xs text-slate-400 font-normal">EVs/charger</span></span>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase block">Top Site ROI Potential</span>
+                <span className="text-2xl font-black text-purple-400 font-mono">{selectedCandidate.estRoi}% <span className="text-xs text-slate-400 font-normal">annual</span></span>
+              </div>
+            </div>
+
+            {/* Map & List Section */}
+            <div className="grid grid-cols-12 gap-6">
+              
+              {/* Candidate List (4 cols) */}
+              <div className="col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 h-[580px] flex flex-col">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-2">🎯 Top Ranked Candidate Hubs</h3>
+                <div className="flex-1 overflow-y-auto space-y-2.5">
+                  {CANDIDATES.map(c => (
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedCandidate(c)}
+                      className={`p-3 rounded-xl border cursor-pointer transition ${c.id === selectedCandidate.id ? 'bg-slate-800 border-emerald-500 ring-1 ring-emerald-500/30' : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'}`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-xs text-white">#{c.rank} {c.name}</span>
+                        <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">{c.score}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">{c.district} • {c.predictedSessions} sessions/day</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* GIS Map View (8 cols) */}
+              <div className="col-span-8 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden relative h-[580px]">
+                <div className="absolute top-4 left-4 z-[400] bg-slate-900/90 border border-slate-800 p-2 rounded-xl flex gap-2 text-xs">
+                  <button onClick={() => setActiveLayer('candidates')} className={`px-3 py-1 rounded-lg font-semibold ${activeLayer === 'candidates' ? 'bg-emerald-500 text-slate-950' : 'text-slate-300'}`}>Top AI Candidates</button>
+                  <button onClick={() => setActiveLayer('stations')} className={`px-3 py-1 rounded-lg font-semibold ${activeLayer === 'stations' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300'}`}>Existing Supply</button>
+                  <button onClick={() => setActiveLayer('gap')} className={`px-3 py-1 rounded-lg font-semibold ${activeLayer === 'gap' ? 'bg-amber-500 text-slate-950' : 'text-slate-300'}`}>Demand Gap</button>
+                </div>
+                <div ref={mapContainerRef} className="w-full h-full"></div>
+              </div>
+
+            </div>
+
+            {/* Dynamic Tabs Section */}
+            <div className="space-y-4">
+              <div className="flex gap-3 border-b border-slate-800 pb-3">
+                <button onClick={() => setActiveTab('intelligence')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'intelligence' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-900 text-slate-400'}`}>Location Intelligence & SHAP Explainability</button>
+                <button onClick={() => setActiveTab('simulator')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'simulator' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-slate-400'}`}>Investor Financial & ROI Simulator</button>
+                <button onClick={() => setActiveTab('district')} className={`px-4 py-2 rounded-xl text-xs font-bold ${activeTab === 'district' ? 'bg-violet-500 text-white' : 'bg-slate-900 text-slate-400'}`}>MoHUA District Deficit Matrix</button>
+              </div>
+
+              {/* Tab 1: Intelligence */}
+              {activeTab === 'intelligence' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                  <div className="flex justify-between items-start border-b border-slate-800 pb-4">
+                    <div>
+                      <span className="bg-emerald-500/10 text-emerald-400 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase">Rank #{selectedCandidate.rank} Candidate</span>
+                      <h2 className="text-xl font-bold text-white mt-1">{selectedCandidate.name}</h2>
+                      <p className="text-xs text-slate-400">{selectedCandidate.address}</p>
+                    </div>
+                    <div className="text-center bg-slate-950 p-3 rounded-xl border border-emerald-500/30">
+                      <div className="text-[10px] text-slate-400 uppercase font-bold">AI Score</div>
+                      <div className="text-3xl font-black text-emerald-400 font-mono">{selectedCandidate.score}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-3 text-center">
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800"><span className="text-[10px] text-slate-400">Est Sessions</span><p className="text-lg font-bold text-emerald-400">{selectedCandidate.predictedSessions} / day</p></div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800"><span className="text-[10px] text-slate-400">Est Energy Sold</span><p className="text-lg font-bold text-cyan-400">{selectedCandidate.predictedKwh} kWh/day</p></div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800"><span className="text-[10px] text-slate-400">Est Annual ROI</span><p className="text-lg font-bold text-purple-400">{selectedCandidate.estRoi}%</p></div>
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800"><span className="text-[10px] text-slate-400">Payback</span><p className="text-lg font-bold text-amber-400">{selectedCandidate.estPaybackMonths} months</p></div>
+                  </div>
+
+                  {/* SHAP Drivers */}
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Explainable AI (SHAP Feature Importance Drivers)</h3>
+                    <div className="space-y-2 text-xs">
+                      {selectedCandidate.shapFeatures.map((f, i) => (
+                        <div key={i} className="bg-slate-900 p-3 rounded-lg border border-slate-800 flex items-start gap-3">
+                          <span className="bg-emerald-500/20 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded">{f.weight}</span>
+                          <div>
+                            <p className="font-semibold text-slate-200">{f.feature}</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{f.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 2: Financial Simulator */}
+              {activeTab === 'simulator' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                    <h2 className="text-lg font-bold text-white">Investor Financial & ROI Return Simulator</h2>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block uppercase font-bold">Total Estimated Capex</span>
+                      <span className="text-2xl font-black text-emerald-400 font-mono">₹{(totalCapex / 100000).toFixed(2)} Lakhs</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-12 gap-6">
+                    <div className="col-span-5 bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-4 text-xs">
+                      <h3 className="font-bold text-slate-200 uppercase tracking-wider">Configuration Controls</h3>
+                      
+                      <div className="space-y-2">
+                        <label className="text-slate-400 block">DC 50kW Dual Charger Qty</label>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => setDc50Qty(Math.max(0, dc50Qty - 1))} className="w-8 h-8 rounded bg-slate-800 font-bold">-</button>
+                          <span className="font-mono font-bold text-emerald-400 text-sm">{dc50Qty}</span>
+                          <button onClick={() => setDc50Qty(dc50Qty + 1)} className="w-8 h-8 rounded bg-slate-800 font-bold">+</button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-slate-400 block">Retail Selling Tariff (₹/kWh)</label>
+                        <input type="range" min="12" max="25" value={sellTariff} onChange={e => setSellTariff(Number(e.target.value))} className="w-full accent-emerald-400" />
+                        <span className="font-mono text-emerald-400 font-bold">₹{sellTariff}/kWh</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-slate-400 block">Target Utilization %</label>
+                        <input type="range" min="15" max="75" value={targetUtil} onChange={e => setTargetUtil(Number(e.target.value))} className="w-full accent-cyan-400" />
+                        <span className="font-mono text-cyan-400 font-bold">{targetUtil}%</span>
+                      </div>
+                    </div>
+
+                    <div className="col-span-7 space-y-4">
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30">
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase">Annual ROI</span>
+                          <p className="text-2xl font-black text-emerald-400 font-mono mt-1">{roiPercent}%</p>
+                        </div>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-cyan-500/30">
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase">Payback Period</span>
+                          <p className="text-2xl font-black text-cyan-400 font-mono mt-1">{paybackMonths} mo</p>
+                        </div>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 font-semibold uppercase">Monthly Net Profit</span>
+                          <p className="text-xl font-bold text-white font-mono mt-1">₹{(monthlyNetProfit / 1000).toFixed(0)}k</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 3: District Deficit Matrix */}
+              {activeTab === 'district' && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <h2 className="text-lg font-bold text-white">Delhi NCT District Charging Deficit Matrix (MoHUA Standards)</h2>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-slate-300 border border-slate-800">
+                      <thead className="bg-slate-950 uppercase text-[10px] text-slate-400">
+                        <tr>
+                          <th className="p-3">District</th>
+                          <th className="p-3">Registered EVs</th>
+                          <th className="p-3">YoY Growth</th>
+                          <th className="p-3">Public Chargers</th>
+                          <th className="p-3">EV / Charger Ratio</th>
+                          <th className="p-3">Deficit Score</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {DISTRICTS.map((d, i) => (
+                          <tr key={i}>
+                            <td className="p-3 font-bold text-white">{d.name}</td>
+                            <td className="p-3 font-mono">{d.evs.toLocaleString()}</td>
+                            <td className="p-3 text-emerald-400 font-mono">{d.growth}</td>
+                            <td className="p-3 font-mono">{d.chargers}</td>
+                            <td className="p-3 text-amber-400 font-semibold font-mono">{d.ratio}</td>
+                            <td className="p-3"><span className="bg-rose-500/20 text-rose-400 px-2 py-0.5 rounded font-mono font-bold">{d.score} / 100</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+          </main>
+
+          {/* Data Lineage Modal */}
+          {showLineage && (
+            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[1000] flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-4 text-white">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-base">Data Lineage & Provenance Register (SIH Rule 2)</h3>
+                  <button onClick={() => setShowLineage(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+                </div>
+                <div className="space-y-3 text-xs text-slate-300">
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <p className="font-bold text-emerald-400">1. Delhi Open EV Data Portal & MoRTH Vahan</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Ground truth location database for 2,480 active chargers and 246,000 registered EVs.</p>
+                  </div>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <p className="font-bold text-cyan-400">2. OpenStreetMap GIS Geometries</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Road corridor geometries, traffic density features, and POI commercial clusters.</p>
+                  </div>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <p className="font-bold text-purple-400">3. Synthesized AI Demand & Utilization Proxy</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Calibrated hourly charging sessions derived from EV density, corridor traffic, and dwell activity.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Executive Report Modal */}
+          {showReport && (
+            <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[1000] flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-4 text-white">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-base">Executive EV Site Dossier Proposal</h3>
+                  <div className="flex gap-2">
+                    <button onClick={() => window.print()} className="px-3 py-1 bg-emerald-400 text-slate-950 rounded text-xs font-bold">Print / PDF</button>
+                    <button onClick={() => setShowReport(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
+                  </div>
+                </div>
+                <div className="space-y-4 text-xs text-slate-300">
+                  <div className="border-b border-slate-800 pb-2">
+                    <p className="text-emerald-400 font-bold uppercase text-[10px]">MoHUA SIH BV806 Proposal</p>
+                    <h2 className="text-xl font-bold text-white">{selectedCandidate.name}</h2>
+                    <p className="text-slate-400">{selectedCandidate.address}</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-center">
+                    <div><span className="text-[10px] text-slate-400">Rank & Score</span><p className="font-bold text-emerald-400">Rank #{selectedCandidate.rank} ({selectedCandidate.score}/100)</p></div>
+                    <div><span className="text-[10px] text-slate-400">Energy Demand</span><p className="font-bold text-cyan-400">{selectedCandidate.predictedKwh} kWh/day</p></div>
+                    <div><span className="text-[10px] text-slate-400">Annual ROI</span><p className="font-bold text-purple-400">{selectedCandidate.estRoi}% ({selectedCandidate.estPaybackMonths} mo)</p></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+
+</body>
+</html>
